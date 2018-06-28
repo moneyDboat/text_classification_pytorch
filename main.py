@@ -21,7 +21,8 @@ opt.lstm_layers = 2
 model = models.setup(opt)
 if torch.cuda.is_available():
     model.cuda()
-print(opt.model)
+print("using model {}".format(opt.model))
+model.train()
 print("# parameters:", sum(param.numel() for param in model.parameters() if param.requires_grad))
 optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.learning_rate)
 optimizer.zero_grad()
@@ -29,12 +30,14 @@ loss_funtion = F.cross_entropy
 
 for i in range(opt.max_epoch):
     for epoch, batch in enumerate(train_iter):
+        optimizer.zero_grad()
         start = time.time()
         text = batch.text[0]
         predicted = model(text)
-        loss = loss_funtion(predicted, batch.label)
 
+        loss = loss_funtion(predicted, batch.label)
         loss.backward()
+        # utils.clip_gradient(optimizer, opt.grad_clip)
         optimizer.step()
         if epoch % 100 == 0:
             if torch.cuda.is_available():
@@ -45,4 +48,4 @@ for i in range(opt.max_epoch):
                 i, epoch, loss_val, time.time() - start))
 
     accuracy = utils.evaluation(model, test_iter)
-    print("%d iteration with accuracy %.4f" % (i, accuracy))
+    print("%d iteration with accuracy %.7f" % (i, accuracy))

@@ -11,11 +11,12 @@ from torchtext import data
 from torchtext import datasets
 from torchtext.vocab import GloVe
 import numpy as np
+import pdb
 
 
 def load_data(opt):
     # use torchtext to load data, no need to download dataset
-    device = 0 if torch.cuda.is_available() else -1
+    print("loading {} dataset".format(opt.dataset))
     # set up fields
     text = data.Field(lower=True, include_lengths=True, batch_first=True, fix_length=opt.max_seq_len)
     label = data.Field(sequential=False)
@@ -40,9 +41,10 @@ def load_data(opt):
     print('TEXT.vocab.vectors.size()', text.vocab.vectors.size())
 
     # make iterator for splits
-    # train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=opt.batch_size, device=device,
-    #                                                    repeat=False, shuffle=True)
-    train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=opt.batch_size, device=device)
+    train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=opt.batch_size, repeat=False,
+                                                       shuffle=True)
+    # train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=opt.batch_size, repeat=False,
+    #                                                    shuffle=True)
 
     opt.label_size = len(label.vocab)
     opt.vocab_size = len(text.vocab)
@@ -67,3 +69,10 @@ def evaluation(model, test_iter):
             accuracy.append(acc.data.numpy())
     model.train()
     return np.mean(accuracy)
+
+
+def clip_gradient(optimizer, grad_clip):
+    for group in optimizer.param_groups:
+        for param in group['params']:
+            if param.grad is not None and param.requires_grad:
+                param.grad.data.clamp_(-grad_clip, grad_clip)
