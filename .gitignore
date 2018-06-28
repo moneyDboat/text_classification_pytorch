@@ -1,3 +1,9 @@
+# add by myself
+.vector_cache/
+.data/
+
+
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
