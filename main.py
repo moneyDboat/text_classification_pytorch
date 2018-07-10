@@ -25,7 +25,6 @@ print("using model {}".format(opt.model))
 model.train()
 print("# parameters:", sum(param.numel() for param in model.parameters() if param.requires_grad))
 optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.learning_rate)
-optimizer.zero_grad()
 loss_funtion = F.cross_entropy
 
 for i in range(opt.max_epoch):

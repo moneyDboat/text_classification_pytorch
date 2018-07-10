@@ -1,6 +1,8 @@
 # add by myself
 .vector_cache/
 .data/
+emb-100.bin
+val_set.csv
 
 
 
