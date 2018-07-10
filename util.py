@@ -36,9 +36,9 @@ LABEL = data.Field(sequential=False, use_vocab=False)
 # load data
 train_path = '/data/yujun/datasets/daguanbei_data/new_train_set.csv'
 val_path = '/data/yujun/datasets/daguanbei_data/val_set.csv'
-test_path = '/data/yujun/datasets/daguanbei_data/test_path.csv'
-val = GrandDataset(val_path, text_field=TEXT, label_field=LABEL)
+test_path = '/data/yujun/datasets/daguanbei_data/test_set.csv'
 train = GrandDataset(train_path, text_field=TEXT, label_field=LABEL)
+val = GrandDataset(val_path, text_field=TEXT, label_field=LABEL)
 test = GrandDataset(test_path, text_field=TEXT, label_field=None, test=True)
 
 # # 构建Vocub
