@@ -7,44 +7,105 @@
 """
 
 import torch
-import torch.optim as optim
 import torch.nn.functional as F
 import time
 import models
 import utils
-import opts
+from config import DefaultConfig
+import fire
+import random
+from utils import Visualizer
+import numpy as np
 
-opt = opts.parse_opt()
-train_iter, test_iter = utils.load_data(opt)
-opt.lstm_layers = 2
 
-model = models.setup(opt)
-if torch.cuda.is_available():
-    model.cuda()
-print("using model {}".format(opt.model))
-model.train()
-print("# parameters:", sum(param.numel() for param in model.parameters() if param.requires_grad))
-optimizer = optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=opt.learning_rate)
-loss_funtion = F.cross_entropy
+def main(**kwargs):
+    config = DefaultConfig()
+    config.parse(kwargs)
+    config.env = str(config.id)
+    vis = Visualizer
 
-for i in range(opt.max_epoch):
-    for epoch, batch in enumerate(train_iter):
-        optimizer.zero_grad()
-        start = time.time()
-        text = batch.text[0]
-        predicted = model(text)
+    # set random seed
+    # cpu and gpu both need to set
+    torch.manual_seed(config.seed)
+    torch.cuda.manual_seed(config.seed)
+    np.random.seed(config.seed)
+    random.seed(config.seed)
 
-        loss = loss_funtion(predicted, batch.label)
-        loss.backward()
-        # utils.clip_gradient(optimizer, opt.grad_clip)
-        optimizer.step()
-        if epoch % 100 == 0:
-            if torch.cuda.is_available():
-                loss_val = loss.cpu().data.numpy()
-            else:
-                loss_val = loss.data.numpy()
-            print("%d iteration %d epoch with loss : %.5f in %.4f seconds" % (
-                i, epoch, loss_val, time.time() - start))
+    if not torch.cuda.is_available():
+        config.cuda = False
+        config.device = None
 
-    accuracy = utils.evaluation(model, test_iter)
-    print("%d iteration with accuracy %.7f" % (i, accuracy))
+    train_iter, test_iter, emb_vectors = utils.load_data(config)
+    config.print_config()
+
+    model = getattr(models, config.model)(config, emb_vectors)
+    print(model)
+
+    if config.cuda:
+        torch.cuda.set_device(config.device)
+        model.cuda()
+
+    # 目标函数和优化器
+    loss_f = F.cross_entropy
+    lr1, lr2 = config.lr1, config.lr2
+    optimizer = model.get_optimizer(lr1, lr2)
+
+    model.train()
+    for epoch in range(config.max_epochs):
+        start_time = time.time()
+        total_loss = 0.0
+        correct = 0
+        total = 0
+
+        for batch_i, batch in enumerate(train_iter):
+            text, label = batch.text[0], batch.label
+            if config.cuda:
+                text, label = text.cuda(), label.cuda()
+
+            optimizer.zero_grad()
+            pred = model(text)
+            loss = loss_f(pred, label)
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            predicted = pred.max(dim=1)[1]
+            total += label.size(0)
+            correct += predicted.eq(label).sum().item()
+
+            if (batch_i + 1) % (10000 // config.batch_size) == 0:
+                # 10000条训练数据输出一次统计指标
+                print('[Epoch {}] loss: {:.5f} | Acc: {:.3f}%({}/{})'.format(epoch + 1, total_loss,
+                                                                             100.0 * correct / total, correct, total))
+
+        train_acc, train_acc_n, train_n = val(model, train_iter, config)
+        print('Epoch {} time spends : {:.1f}s'.format(epoch + 1, time.time() - start_time))
+        print('Epoch {} Train Acc: {:.2f}%({}/{})'.format(epoch + 1, train_acc, train_acc_n, train_n))
+        test_acc, test_acc_n, test_n = val(model, test_iter, config)
+        print('Epoch {} Test Acc: {:.2f}%({}/{})\n'.format(epoch + 1, test_acc, test_acc_n, test_n))
+
+
+def val(model, data_iter, config):
+    model.eval()
+
+    acc_n = 0
+    n = 0
+
+    with torch.no_grad():
+        for batch in data_iter:
+            text, label = batch.text[0], batch.label
+            if config.cuda:
+                text, label = text.cuda(), label.cuda()
+
+            predicted = model(text)
+            pred_i = predicted.max(dim=1)[1]
+            acc_n += (pred_i == label).sum().item()
+            n += label.size(0)
+
+    model.train()
+    acc = 100. * acc_n / n
+    return acc, acc_n, n
+
+
+if __name__ == '__main__':
+    fire.Fire()

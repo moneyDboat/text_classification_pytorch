@@ -6,73 +6,89 @@
 @ide     : PyCharm
 """
 
-import torch
 from torchtext import data
 from torchtext import datasets
 from torchtext.vocab import GloVe
 import numpy as np
-import pdb
+import visdom
 
 
-def load_data(opt):
+def load_data(config):
     # use torchtext to load data, no need to download dataset
-    print("loading {} dataset".format(opt.dataset))
-    # set up fields
-    text = data.Field(lower=True, include_lengths=True, batch_first=True, fix_length=opt.max_seq_len)
-    label = data.Field(sequential=False)
+    print("loading {} dataset".format(config.dataset))
 
-    # make splits for data
-    if opt.dataset == "imdb":
-        train, test = datasets.IMDB.splits(text, label)
-    elif opt.dataset == "sst":
-        train, val, test = datasets.SST.splits(text, label, fine_grained=True, train_subtrees=True,
+    # set up fields
+    TEXT = data.Field(lower=True, include_lengths=True, fix_length=config.max_seq_len)
+    LABEL = data.Field(sequential=False)
+    if config.dataset == "imdb":
+        train, test = datasets.IMDB.splits(TEXT, LABEL)
+    elif config.dataset == "sst":
+        train, val, test = datasets.SST.splits(TEXT, LABEL, fine_grained=True, train_subtrees=True,
                                                filter_pred=lambda ex: ex.label != 'neutral')
-    elif opt.dataset == "trec":
-        train, test = datasets.TREC.splits(text, label, fine_grained=True)
+    elif config.dataset == "trec":
+        train, test = datasets.TREC.splits(TEXT, LABEL, fine_grained=True)
     else:
-        print("The dataset is not supported!")
+        print("The dataset is not supported.")
 
     # build the vocabulary
-    text.build_vocab(train, vectors=GloVe(name='6B', dim=300))
-    label.build_vocab(train)
+    TEXT.build_vocab(train, test, vectors=GloVe(name=config.embed_name, dim=config.embed_dim))
+    LABEL.build_vocab(train, test)
 
     # print vocab information
-    print('len(TEXT.vocab)', len(text.vocab))
-    print('TEXT.vocab.vectors.size()', text.vocab.vectors.size())
+    print('train nums: {}'.format(len(train)))
+    print('test nums: {}'.format(len(test)))
+    print('TEXT.vocab nums: {}'.format(len(TEXT.vocab)))
+    print('LABEL.vocab nums: {}'.format(len(LABEL.vocab)))
 
     # make iterator for splits
-    train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=opt.batch_size, repeat=False,
+    train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=config.batch_size, repeat=False,
                                                        shuffle=True)
-    # train_iter, test_iter = data.BucketIterator.splits((train, test), batch_size=opt.batch_size, repeat=False,
-    #                                                    shuffle=True)
 
-    opt.label_size = len(label.vocab)
-    opt.vocab_size = len(text.vocab)
-    opt.embedding_dim = text.vocab.vectors.size()[1]
-    opt.embeddings = text.vocab.vectors
+    config.label_size = len(LABEL.vocab)
+    config.vocab_size = len(TEXT.vocab)
 
-    return train_iter, test_iter
+    return train_iter, test_iter, TEXT.vocab.vectors
 
 
-def evaluation(model, test_iter):
-    model.eval()
-    accuracy = []
-    for index, batch in enumerate(test_iter):
-        text = batch.text[0]
-        predicted = model(text)
-        prob, idx = torch.max(predicted, 1)
-        acc = (idx == batch.label).float().mean()
+class Visualizer():
+    '''
+    封装了visdom的基本操作，但是可以通过self.vis.function调用原生的visdom接口
+    '''
 
-        if torch.cuda.is_available():
-            accuracy.append(acc.data.cpu().numpy())
-        else:
-            accuracy.append(acc.data.numpy())
-    model.train()
-    return np.mean(accuracy)
+    def __init__(self, env='default', **kwargs):
+        import visdom
+        self.vis = visdom.Visdom(env=env, **kwargs)
 
+        # 画的第几个数，相当于横坐标
+        # 保存('loss', 23)，即loss的第23个点
+        self.index = {}
+        self.log_text = ''
 
-def clip_gradient(optimizer, grad_clip):
-    for group in optimizer.param_groups:
-        for param in group['params']:
-            if param.grad is not None and param.requires_grad:
-                param.grad.data.clamp_(-grad_clip, grad_clip)
+    def reinit(self, env='default', **kwargs):
+        '''
+        修改visdom的配置
+        '''
+        self.vis = visdom.Visdom(env=env, **kwargs)
+        return self
+
+    def plot_many(self, d):
+        for k, v in d.iteritems():
+            self.plot(k, v)
+
+    def plot(self, name, y):
+        # self.plot('loss', 1.00)
+
+        x = self.index.get(name, 0)
+        self.vis.line(X=np.array([x]), Y=np.array([y]),
+                      win=name,
+                      opts=dict(title=name),
+                      update=None if x == 0 else 'append')
+        self.index[name] = x + 1
+
+    def log(self, info, win='log_txt'):
+        # self.log({'loss':1, 'lr':0.0001})
+        self.log_text += ('[{time}] {info} <br>'.format(time=time.strftime('%m%d_%H%M%S'), info=info))
+        self.vis.text(self.log_text, win=win)
+
+    def __getattr__(self, item):
+        return getattr(self.vis, item)
